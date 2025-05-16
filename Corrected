@@ -1,0 +1,68 @@
+# Source Data Check Logic with Retry
+def check_src_data(**kwargs):
+    hook = BigQueryHook(gcp_conn_id=bq_connection_id, location=region)
+
+    # Queries for the three source tables
+    queries = {
+        "fjpv": f"""
+            SELECT COUNT(*) AS row_cnt
+            FROM {fjpv_src_tbl}
+            WHERE process_nm in ('ETL_NTWK_DMA_NQES_cell_gudv')
+            AND status = 'COMPLETE'
+            AND run_dt = '{kwargs["ds"]}'
+        """,
+        "enodeb_gudv": f"""
+            SELECT COUNT(*) AS row_cnt
+            FROM {gudv_tbl}
+            WHERE target_name LIKE '%dim_inventory_enodeb_site_map_norm_v0%'
+            AND status = 'COMPLETE'
+            AND process_dt = '{kwargs["ds"]}'
+        """,
+        "cell_gudv": f"""
+            SELECT COUNT(*) AS row_cnt
+            FROM {gudv_tbl}
+            WHERE target_name LIKE '%dim_inventory_cell_sites_norm_v0%'
+            AND status = 'COMPLETE'
+            AND process_dt = '{kwargs["ds"]}'
+        """,
+    }
+
+    retry_interval = 180  # 15 minutes in seconds
+    max_attempts = 2      # 3 hours total (2 * 15 minutes)
+    attempt = 0
+
+    # Retry loop
+    while attempt < max_attempts:
+        print(f"Attempt {attempt + 1} of {max_attempts}")
+
+        all_ready = True
+        for table_name, query in queries.items():
+            print(f"Executing query for {table_name}:\n{query}")
+            try:
+                # Log the query for debugging
+                print(f"Executing query: {query}")
+
+                # Execute the query
+                result = hook.get_records(sql=query)
+                count = int(result[0][0]) if result else 0
+                print(f"{table_name} Result Count: {count}")
+
+                if count == 0:
+                    all_ready = False
+                    print(f"No data found for {table_name}.")
+                    break
+            except Exception as e:
+                print(f"Error executing query for {table_name}: {e}")
+                all_ready = False
+                break
+
+        if all_ready:
+            print("All source tables are ready for processing.")
+            return True
+
+        print(f"Data not available, retrying in {retry_interval // 60} minutes...")
+        time.sleep(retry_interval)
+        attempt += 1
+
+    # If we reached here, it means retries were exhausted
+    raise AirflowException("Source data not available after retries. Failing DAG execution.")
