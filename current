@@ -1,0 +1,152 @@
+from datetime import datetime
+from airflow import DAG
+import os
+import sys
+import yaml
+from airflow.providers.google.cloud.operators.bigquery import (
+    BigQueryInsertJobOperator,
+)
+from airflow.providers.google.cloud.hooks.bigquery import BigQueryHook
+from airflow.operators.python import PythonOperator
+from airflow.operators.dummy import DummyOperator
+from functools import partial
+from datetime import datetime, timedelta
+from airflow.utils.trigger_rule import TriggerRule
+from airflow.sensors.sql import SqlSensor
+
+BASE_DIR = "/home/airflow/gcs/dags/vz-it-gudv-dtwndo-0"
+sys.path.append(f"{BASE_DIR}/nqes_site/python")
+
+
+#from vz_de_common_observability_integration import publishLog, create_do_dict
+from DO_utils import publishLog, create_do_dict
+
+project = os.environ['GCP_PROJECT']
+with open(f"{BASE_DIR}/nqes_site/config/base_config.yml", 'r') as file:
+    base_config = yaml.full_load(file)
+
+with open(f"{BASE_DIR}/nqes_site/config/gudv_nqes_site.yml", 'r') as file:
+    dag_config = yaml.full_load(file)
+
+config_values = {}
+
+
+filtered_base_dict = dict(filter(lambda elem: elem[0] == project, base_config.items()))
+filtered_dict = dict(filter(lambda elem: elem[0] == project, dag_config.items()))
+
+if len(filtered_base_dict) > 0:
+    base_value = filtered_base_dict[project][0]
+    config_values = {**config_values, **base_value}
+else:
+    print("No config found exiting...")
+    sys.exit(-1)
+if len(filtered_dict) > 0:
+    app_value = filtered_dict[project][0]
+    config_values = {**config_values, **app_value}
+else:
+    print("No config found exiting...")
+    sys.exit(-1)
+
+GCP_PROJECT_ID = config_values['gcp_project']
+bq_connection_id = config_values['google_cloud_conn_id']
+region = config_values['region']
+DAG_ID = config_values['dag_id']
+base_directory = config_values['base_directory']
+env = config_values['env']
+dataset_id = config_values['dataset_id']
+stored_proc = config_values['stored_proc']
+table_name = config_values['table_name']
+schedule_interval = config_values['schedule_interval']
+failure_email_alert_distro = config_values['failure_email_alert_distro']
+
+process_date = '{{ data_interval_end.strftime("%Y-%m-%d") }}'
+trans_date = '{{ data_interval_end.subtract(days=1).strftime("%Y-%m-%d") }}'
+
+
+default_args = {
+    'owner': 'airflow',
+    'depends_on_past': False,
+    'start_date': datetime(year=2025, month=4, day=30, hour=9, minute=00),
+    'email': [failure_email_alert_distro],
+    'email_on_failure': True,
+    'email_on_retry': False,
+    'retries': 3,
+    'retry_delay': timedelta(minutes=3)
+}
+
+dag = DAG(
+    dag_id=DAG_ID,
+    schedule_interval=schedule_interval,
+    catchup=True,
+    default_args=default_args,
+    description='This DAG call Stored Procedure',
+    concurrency=int(config_values['concurrency']),
+    max_active_runs=int(config_values['max_active_runs']),
+    tags=["dtwin","nw_research_assistant","network_genie","nqes_site"]
+)
+
+
+do_dict = create_do_dict(config_values)
+
+start = DummyOperator(task_id='start',
+                      dag=dag,
+                      on_success_callback=partial(publishLog, "PROGRESS", do_dict),
+                      on_failure_callback=partial(publishLog, "FAILURE", do_dict))
+
+def check_src_data(**kwargs):
+    hook = BigQueryHook(gcp_conn_id=bq_connection_id,location='us-east4')
+    query = f"""
+        SELECT COUNT(*) AS status_check
+        FROM `vz-it-pr-fjpv-mlopdo-0.mlops_curated_tbls_rd_v.run_dt_cntrl_tbl_v2`
+        WHERE process_nm IN ('ETL_NTWK_DMA_NQES_SITE')
+        AND status = 'COMPLETE'
+        AND run_dt = '{kwargs["ds"]}'
+    """
+    
+    # These lines must be indented properly
+    retry_interval = 900   # 15 minutes
+    max_attempts = 12      # 3 hours total (12 * 15 = 180 minutes)
+    attempt = 0
+    
+    while attempt < max_attempts:
+        records = hook.get_records(sql=query)
+        if records and records[0][0] > 0:
+            print("Data is available, proceeding with next step")
+            return True
+        else:
+            print(f"Data not found, retrying attempt {attempt + 1} of 12")
+            time.sleep(retry_interval)
+            attempt += 1
+    
+    raise ValueError("Data not found after 3 hours of retrying")
+
+source_check=PythonOperator(
+    task_id='source_check',
+    python_callable=check_src_data,
+    provide_context=True,
+    retries=0,
+    dag=dag
+
+)
+call_nqes_site_sp = BigQueryInsertJobOperator(
+        task_id="call_nqes_site_sp",
+        dag=dag,
+        gcp_conn_id=bq_connection_id,
+        configuration={
+                         "query": {
+                              "query": f"CALL {dataset_id}.{stored_proc}('{trans_date}','{process_date}')",
+                              "useLegacySql": False,
+                              }
+                         },
+        on_failure_callback=partial(publishLog, "FAILURE", do_dict)
+
+)
+end = DummyOperator(task_id='end',
+                    dag=dag,
+                    on_success_callback=partial(publishLog, "SUCCESS", do_dict),
+                    on_failure_callback=partial(publishLog, "FAILURE", do_dict))
+
+
+
+
+start  >>source_check >> call_nqes_site_sp >> end
