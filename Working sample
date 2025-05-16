@@ -1,0 +1,185 @@
+from datetime import datetime, timedelta
+from functools import partial
+from airflow import DAG, AirflowException
+import os
+import sys
+import yaml
+from airflow.operators.dummy import DummyOperator
+from airflow.providers.google.cloud.hooks.bigquery import BigQueryHook
+from airflow.operators.python import PythonOperator
+from airflow.providers.google.cloud.operators.bigquery import BigQueryInsertJobOperator
+from airflow.utils.trigger_rule import TriggerRule
+import time
+
+BASE_DIR = "/home/airflow/gcs/dags/vz-it-gudv-dtwndo-0"
+sys.path.append(f"{BASE_DIR}/nqes_site/python")
+
+from DO_utils import publishLog, create_do_dict
+
+# Load configurations
+project = os.environ['GCP_PROJECT']
+with open(f"{BASE_DIR}/nqes_site/config/base_config.yml", 'r') as file:
+    base_config = yaml.full_load(file)
+
+with open(f"{BASE_DIR}/nqes_site/config/gudv_nqes_site.yml", 'r') as file:
+    dag_config = yaml.full_load(file)
+
+config_values = {}
+
+filtered_base_dict = dict(filter(lambda elem: elem[0] == project, base_config.items()))
+filtered_dict = dict(filter(lambda elem: elem[0] == project, dag_config.items()))
+
+if len(filtered_base_dict) > 0:
+    base_value = filtered_base_dict[project][0]
+    config_values = {**config_values, **base_value}
+else:
+    print("No config found exiting..")
+    sys.exit(-1)
+if len(filtered_dict) > 0:
+    app_value = filtered_dict[project][0]
+    config_values = {**config_values, **app_value}
+else:
+    print("No config found exiting..")
+    sys.exit(-1)
+
+# Extract configurations
+GCP_PROJECT_ID = config_values['gcp_project']
+bq_connection_id = config_values['google_cloud_conn_id']
+region = config_values['region']
+DAG_ID = config_values['dag_id']
+dataset_id = config_values['dataset_id']
+stored_proc = config_values['stored_proc']
+schedule_interval = config_values['schedule_interval']
+failure_email_alert_distro = config_values['failure_email_alert_distro']
+
+# Initialize DO dictionary
+do_dict = create_do_dict(config_values)
+
+# Default arguments for the DAG
+default_args = {
+    'owner': 'dtwin',
+    'depends_on_past': False,
+    'start_date': datetime(year=2025, month=5, day=1, hour=6, minute=30),
+    'email': [failure_email_alert_distro],
+    'email_on_failure': True,
+    'email_on_retry': False,
+    'retries': 0,
+    'retry_delay': timedelta(minutes=3)
+}
+
+# Define DAG
+dag = DAG(
+    dag_id=DAG_ID,
+    schedule_interval=schedule_interval,
+    catchup=False,
+    default_args=default_args,
+    description='This DAG call Stored Procedure',
+    concurrency=int(config_values['concurrency']),
+    max_active_runs=int(config_values['max_active_runs']),
+    tags=["dtwin", "ug"]
+)
+
+# Start Dummy Operator
+start = DummyOperator(task_id='start',
+                      dag=dag,
+                      on_success_callback=partial(publishLog, "PROGRESS", do_dict),
+                      on_failure_callback=partial(publishLog, "FAILURE", do_dict))
+
+# End Dummy Operator
+end = DummyOperator(task_id='end',
+                    dag=dag,
+                    on_success_callback=partial(publishLog, "SUCCESS", do_dict),
+                    on_failure_callback=partial(publishLog, "FAILURE", do_dict),
+                    trigger_rule='all_done'
+                   )
+
+# Source Data Check Logic with Retry
+def check_src_data(**kwargs):
+    hook = BigQueryHook(gcp_conn_id=bq_connection_id, location=region)
+
+    # Queries for the three source tables
+    mni_sql = f"""
+        SELECT COUNT(*) AS row_cnt
+        FROM `vz-it-pr-gudv-dtwndo-0.aid_dtwin_internal_core_tbls_rd_v.mni_table`
+        WHERE process_nm = 'ETL_NTWK_DMA_NQES_SITE'
+        AND status = 'COMPLETE'
+        AND run_dt = '{kwargs["ds"]}'
+    """
+    
+    anpd_sql = f"""
+        SELECT COUNT(*) AS row_cnt
+        FROM `vz-it-pr-gudv-dtwndo-0.aid_dtwin_internal_core_tbls_rd_v.anpd_table`
+        WHERE process_nm = 'ETL_ANPD_PROCESS'
+        AND status = 'COMPLETE'
+        AND run_dt = '{kwargs["ds"]}'
+    """
+    
+    site_sql = f"""
+        SELECT COUNT(*) AS row_cnt
+        FROM `vz-it-pr-gudv-dtwndo-0.aid_dtwin_internal_core_tbls_rd_v.site_table`
+        WHERE process_nm = 'ETL_SITE_PROCESS'
+        AND status = 'COMPLETE'
+        AND run_dt = '{kwargs["ds"]}'
+    """
+
+    retry_interval = 900  # 15 minutes in seconds
+    max_attempts = 15     # 15 attempts (15 * 15 mins = 225 mins = 3 hours)
+    attempt = 0
+
+    while attempt < max_attempts:
+        print(f"Attempt {attempt + 1} of {max_attempts}")
+
+        print(f"Executing MNI SQL:\n{mni_sql}")
+        mni_result = hook.get_records(sql=mni_sql)
+        mni_count = int(mni_result[0][0]) if mni_result else 0
+        print(f"MNI Result Count: {mni_count}")
+
+        print(f"Executing ANPD SQL:\n{anpd_sql}")
+        anpd_result = hook.get_records(sql=anpd_sql)
+        anpd_count = int(anpd_result[0][0]) if anpd_result else 0
+        print(f"ANPD Result Count: {anpd_count}")
+
+        print(f"Executing SITE SQL:\n{site_sql}")
+        site_result = hook.get_records(sql=site_sql)
+        site_count = int(site_result[0][0]) if site_result else 0
+        print(f"SITE Result Count: {site_count}")
+
+        # If all three counts are > 0, proceed
+        if mni_count > 0 and anpd_count > 0 and site_count > 0:
+            print("All source tables are ready for processing.")
+            return True
+
+        print("Data not available, retrying in 15 minutes...")
+        time.sleep(retry_interval)
+        attempt += 1
+
+    # If we reached here, it means 3 hours passed without data
+    print("Data not available after 3 hours. DAG will fail gracefully.")
+    raise AirflowException("Source data not available. Failing DAG execution.")
+
+# Source Data Check Operator
+source_data_check = PythonOperator(
+    task_id='source_data_check',
+    python_callable=check_src_data,
+    provide_context=True,
+    retries=0,
+    dag=dag
+)
+
+# Call Stored Procedure, only if source data check passes
+call_stored_proc = BigQueryInsertJobOperator(
+    task_id="call_stored_proc",
+    dag=dag,
+    gcp_conn_id=bq_connection_id,
+    configuration={
+        "query": {
+            "query": f"CALL {dataset_id}.{stored_proc}('{{{{ ds }}}}', '{{{{ ds }}}}')",
+            "useLegacySql": False,
+        }
+    },
+    trigger_rule='all_success',
+    on_failure_callback=partial(publishLog, "FAILURE", do_dict)
+)
+
+# Define the Task Dependencies
+start >> source_data_check >> call_stored_proc >> end
