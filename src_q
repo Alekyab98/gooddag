@@ -1,0 +1,14 @@
+
+SELECT COUNT(*) AS status_check
+        FROM `vz-it-pr-fjpv-mlopdo-0.mlops_curated_tbls_rd_v.run_dt_cntrl_tbl_v2`
+        WHERE process_nm IN ('ETL_NTWK_DMA_NQES_SITE')
+        AND status = 'COMPLETE'
+        AND run_dt = trans_date
+
+select count(*) from vz-it-pr-gudv-dtwndo-0.aid_dtwin_internal_core_tbls_rd_v.dtwin_audit_process_v0 
+where target_name like '%dim_inventory_enodeb_site_map_norm_v0%'
+and process_dt=CAST(date_sub(cast(trans_date as DATE),  INTERVAL 5 DAY) AS STRING)
+
+ select count(*) from vz-it-pr-gudv-dtwndo-0.aid_dtwin_internal_core_tbls_rd_v.dtwin_audit_process_v0 
+where target_name like '%dim_inventory_cell_sites_norm_v0%'
+and process_dt=CAST(date_sub(cast(trans_date as DATE),  INTERVAL 5 DAY) AS STRING)
