@@ -1,0 +1,8 @@
+# Queries for the three source tables
+queries = {
+    "fjpv": f"""SELECT COUNT(*) AS row_cnt FROM {fjpv_src_tbl} WHERE process_nm IN ('ETL_NTWK_DMA_NQES_SITE') AND status = 'COMPLETE' AND run_dt = DATE_SUB('{kwargs["ds"]}', INTERVAL 1 DAY)""",
+    
+    "enodeb_gudv": f"""SELECT COUNT(*) AS row_cnt FROM {gudv_tbl} WHERE target_name LIKE '%dim_inventory_enodeb_site_map_norm_v0%' AND status = 'COMPLETE' AND process_dt = DATE_SUB('{kwargs["ds"]}', INTERVAL 1 DAY)""",
+
+    "cell_gudv": f"""SELECT COUNT(*) AS row_cnt FROM {gudv_tbl} WHERE target_name LIKE '%dim_inventory_cell_sites_norm_v0%' AND status = 'COMPLETE' AND process_dt = DATE_SUB('{kwargs["ds"]}', INTERVAL 1 DAY)"""
+}
