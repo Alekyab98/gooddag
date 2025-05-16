@@ -1,0 +1,251 @@
+from datetime import datetime, timedelta
+from functools import partial
+from airflow import DAG, AirflowException
+import os
+import sys
+import yaml
+from airflow.operators.dummy import DummyOperator
+from airflow.providers.google.cloud.hooks.bigquery import BigQueryHook
+from airflow.operators.python import PythonOperator, BranchPythonOperator
+from airflow.providers.google.cloud.operators.bigquery import BigQueryInsertJobOperator
+
+BASE_DIR = "/home/airflow/gcs/dags/vz-it-gudv-dtwndo-0"
+sys.path.append(f"{BASE_DIR}/dag_test/python")
+
+from DO_utils import publishLog, create_do_dict
+
+project = os.environ['GCP_PROJECT']
+with open(f"{BASE_DIR}/dag_test/config/base_config.yaml", 'r') as file:
+    base_config = yaml.full_load(file)
+
+with open(f"{BASE_DIR}/dag_test/config/ug.yml", 'r') as file:
+    dag_config = yaml.full_load(file)
+
+config_values = {}
+
+filtered_base_dict = dict(filter(lambda elem: elem[0] == project, base_config.items()))
+filtered_dict = dict(filter(lambda elem: elem[0] == project, dag_config.items()))
+
+if len(filtered_base_dict) > 0:
+    base_value = filtered_base_dict[project][0]
+    config_values = {**config_values, **base_value}
+else:
+    print("No config found exiting..")
+    sys.exit(-1)
+if len(filtered_dict) > 0:
+    app_value = filtered_dict[project][0]
+    config_values = {**config_values, **app_value}
+else:
+    print("No config found exiting..")
+    sys.exit(-1)
+
+GCP_PROJECT_ID = config_values['gcp_project']
+bq_connection_id = config_values['google_cloud_conn_id']
+region = config_values['region']
+DAG_ID = config_values['dag_id']
+base_directory = config_values['base_directory']
+env = config_values['env']
+dataset_id = config_values['dataset_id']
+mni_session_sp = config_values['mni_session_sp']
+anpd_session_sp = config_values['anpd_session_sp']
+imsi_sp = config_values['imsi_sp']
+site_sp = config_values['site_sp']
+coverage_health_sp = config_values['coverage_health_sp']
+mni_session_tgt_tbl = config_values['mni_session_tgt_tbl']
+anpd_session_tgt_tbl = config_values['anpd_session_tgt_tbl']
+imsi_tgt_tbl = config_values['imsi_tgt_tbl']
+site_tgt_tbl = config_values['site_tgt_tbl']
+coverage_health_tgt_tbl = config_values['coverage_health_tgt_tbl']
+mni_src_tbl = config_values['mni_src_tbl']
+anpd_src_tbl = config_values['anpd_src_tbl']
+schedule_interval = config_values['schedule_interval']
+failure_email_alert_distro = config_values['failure_email_alert_distro']
+
+do_dict = create_do_dict(config_values)
+
+default_args = {
+    'owner': 'dtwin',
+    'depends_on_past': False,
+    'start_date': datetime(year=2025, month=5, day=1, hour=6, minute=30),
+    'email': [failure_email_alert_distro],
+    'email_on_failure': True,
+    'email_on_retry': False,
+    'retries': 0,
+    'retry_delay': timedelta(minutes=3)
+}
+
+dag = DAG(
+    dag_id=DAG_ID,
+    schedule_interval=schedule_interval,
+    catchup=False,
+    default_args=default_args,
+    description='This DAG call Stored Procedure',
+    concurrency=int(config_values['concurrency']),
+    max_active_runs=int(config_values['max_active_runs']),
+    tags=["dtwin", "ug"]
+)
+
+start = DummyOperator(task_id='start',
+                      dag=dag,
+                      on_success_callback=partial(publishLog, "PROGRESS", do_dict),
+                      on_failure_callback=partial(publishLog, "FAILURE", do_dict))
+
+def session_src_count_check(**context):
+    bq_hook = BigQueryHook(gcp_conn_id=bq_connection_id, delegate_to=None, use_legacy_sql=False)
+    client = bq_hook.get_client()
+    process_date = context['data_interval_end'].strftime("%Y-%m-%d %H:%M:%S")
+    process_date = datetime.strptime(process_date, "%Y-%m-%d %H:%M:%S")
+    ti = context['ti']
+    ti.xcom_push(key="process_date", value=process_date)
+    print("process_date:{}".format(process_date))
+    # trans_date
+    trans_date = context['data_interval_end'].strftime("%Y-%m-%d")
+    trans_date = datetime.strptime(trans_date, "%Y-%m-%d")
+    trans_date = trans_date
+    trans_date = trans_date.strftime("%Y-%m-%d")
+    ti = context['ti']
+    ti.xcom_push(key="trans_date", value=trans_date)
+    print("trans_date:{}".format(trans_date))
+    print("process_date::{},trans_date:{}".format(process_date, trans_date))
+    # arrival_dt_hr
+    arrival_dt_hr = context['data_interval_end'].strftime("%Y-%m-%d %H:%M:%S")
+    arrival_dt_hr = datetime.strptime(arrival_dt_hr, "%Y-%m-%d %H:%M:%S")
+    arrival_dt_hr = arrival_dt_hr - timedelta(hours=1)
+    arrival_dt_hr = arrival_dt_hr.strftime("%Y%m%d%H")
+    ti = context['ti']
+    ti.xcom_push(key="arrival_dt_hr", value=arrival_dt_hr)
+    print("arrival_dt_hr:{} ".format(arrival_dt_hr))
+    print("process_date::{},trans_date:{},arrival_dt_hr::{}".format(process_date, trans_date, arrival_dt_hr))
+    print(f"MNI source table: {mni_src_tbl}")
+    print(f"ANPD source table: {anpd_src_tbl}")
+    mni_sql = f""" SELECT count(1) as row_cnt from {mni_src_tbl} """  # use where trans_dt is not null and arrival = cast({arrival_dt_hr} as string)
+    print("sql :{}".format(mni_sql))
+    mni_result = client.query(mni_sql).to_dataframe()
+    print("sql_result {}".format(mni_result))
+    mni_cnt = int(mni_result['row_cnt'][0])
+    print("rec_cnt {}".format(mni_cnt))
+    anpd_sql = f""" SELECT count(1) as row_cnt from {anpd_src_tbl} """  # use where trans_dt is not null and arrival = cast({arrival_dt_hr} as string)
+    print("sql :{}".format(anpd_sql))
+    anpd_result = client.query(anpd_sql).to_dataframe()
+    print("sql_result {}".format(anpd_result))
+    anpd_cnt = int(anpd_result['row_cnt'][0])
+    print("rec_cnt {}".format(anpd_cnt))
+    trans_dt = context['ti'].xcom_pull(task_ids='source_data_check', key='trans_date')
+    process_dt = context['ti'].xcom_pull(task_ids='source_data_check', key='process_date')
+    arrival_dt_hr = context['ti'].xcom_pull(task_ids='source_data_check', key='arrival_dt_hr')
+    if int(mni_cnt) == 0 and int(anpd_cnt) == 0 :
+        arrival_dt_hr = context['ti'].xcom_pull(task_ids='source_data_check', key='arrival_dt_hr')
+        print("arrival_dt_hr:{} ".format(arrival_dt_hr))
+        mni_table = mni_src_tbl.split(".")[2]
+        anpd_table = anpd_src_tbl.split(".")[2]
+        raise AirflowException(f"""Airflow exception -> No Data for Session tables for arrival hour: {arrival_dt_hr}"
+                                            Please verify data availability in {mni_table} and {anpd_table} for {arrival_dt_hr} arrival.
+                                            MNI source Table : {mni_src_tbl}
+                                            ANPD source Table : {anpd_src_tbl}
+                                            Trans_date   : {trans_dt}
+                                            Process_Date : {process_dt}
+
+                                            Regards,
+                                            DE Team""")
+
+    else:
+        return ['call_mni_session_sp', 'call_anpd_session_sp']
+
+
+
+source_data_check = BranchPythonOperator(
+    dag=dag,
+    task_id="source_data_check",
+    python_callable=session_src_count_check,
+    provide_context=True,
+    trigger_rule="none_failed",
+    on_failure_callback=partial(publishLog, "FAILURE", do_dict)
+)
+
+trans_date = "{{ task_instance.xcom_pull(task_ids='source_data_check', key='trans_date') }}"
+process_date = "{{ task_instance.xcom_pull(task_ids='source_data_check', key='process_date') }}"
+arrival_dt_hr = "{{ task_instance.xcom_pull(task_ids='source_data_check', key='arrival_dt_hr') }}"
+
+call_mni_session_sp = BigQueryInsertJobOperator(
+    task_id="call_mni_session_sp",
+    dag=dag,
+    gcp_conn_id=bq_connection_id,
+    configuration={
+        "query": {
+            "query": f"CALL {dataset_id}.{mni_session_sp}('{trans_date}','{process_date}','{arrival_dt_hr}')",
+            "useLegacySql": False,
+        }
+    },
+    on_failure_callback=partial(publishLog, "FAILURE", do_dict)
+)
+
+call_anpd_session_sp = BigQueryInsertJobOperator(
+    task_id="call_anpd_session_sp",
+    dag=dag,
+    gcp_conn_id=bq_connection_id,
+    configuration={
+        "query": {
+            "query": f"CALL {dataset_id}.{anpd_session_sp}('{trans_date}','{process_date}','{arrival_dt_hr}')",
+            "useLegacySql": False,
+        }
+    },
+    on_failure_callback=partial(publishLog, "FAILURE", do_dict)
+)
+
+call_imsi_sp = BigQueryInsertJobOperator(
+    task_id="call_imsi_sp",
+    dag=dag,
+    gcp_conn_id=bq_connection_id,
+    configuration={
+        "query": {
+            "query": f"CALL {dataset_id}.{imsi_sp}('{trans_date}','{process_date}','{arrival_dt_hr}')",
+            "useLegacySql": False,
+        }
+    },
+    on_failure_callback=partial(publishLog, "FAILURE", do_dict)
+)
+
+call_site_sp = BigQueryInsertJobOperator(
+    task_id="call_site_sp",
+    dag=dag,
+    gcp_conn_id=bq_connection_id,
+    configuration={
+        "query": {
+            "query": f"CALL {dataset_id}.{site_sp}('{trans_date}','{process_date}','{arrival_dt_hr}')",
+            "useLegacySql": False,
+        }
+    },
+    on_failure_callback=partial(publishLog, "FAILURE", do_dict)
+)
+
+call_cov_health_sp = BigQueryInsertJobOperator(
+    task_id="call_cov_health_sp",
+    dag=dag,
+    gcp_conn_id=bq_connection_id,
+    configuration={
+        "query": {
+            "query": f"CALL {dataset_id}.{coverage_health_sp}('{trans_date}','{process_date}','{arrival_dt_hr}')",
+            "useLegacySql": False,
+        }
+    },
+    on_failure_callback=partial(publishLog, "FAILURE", do_dict)
+)
+
+end = DummyOperator(task_id='end',
+                    dag=dag,
+                    on_success_callback=partial(publishLog, "SUCCESS", do_dict),
+                    on_failure_callback=partial(publishLog, "FAILURE", do_dict),
+                    trigger_rule='all_done'
+                   )
+
+# Define task dependencies
+start >> source_data_check >> [call_mni_session_sp, call_anpd_session_sp]
+
+# Connect each task in the first list to each task in the second list
+for task1 in [call_mni_session_sp, call_anpd_session_sp]:
+    for task2 in [call_imsi_sp, call_site_sp, call_cov_health_sp]:
+        task1 >> task2
+
+# Connect the second list of tasks to the end task
+[call_imsi_sp, call_site_sp, call_cov_health_sp] >> end
+
