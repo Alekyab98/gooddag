@@ -1,0 +1,25 @@
+vz-it-np-wdwg-dev-aidcom-0:
+  - dag_id: gudv_nw_research_assistant_nqes_site_daily_norm
+    dataset_id: aid_nwgenie_core_tbls
+    stored_proc: nqes_site_sp
+    table_name: nqes_site
+    schedule_interval: "30 19 * * *"
+    fjpv_src_tbl: vz-it-pr-fjpv-mlopdo-0.mlops_curated_tbls_rd_v.run_dt_cntrl_tbl_v2
+    gudv_tbl: vz-it-pr-gudv-dtwndo-0.aid_dtwin_internal_core_tbls_rd_v.dtwin_audit_process_v0 
+    source_name : vz-it-pr-fjpv-mlopdo-0.mlops_scores_tbls_rd_v.nqes_site_scores,vz-it-pr-fjpv-mlopdo-0.mlops_curated_tbls_rd_v.ds_dma_nqes_site,vz-it-pr-gudv-dtwndo-0.aid_dtwin_ran_core_tbls_rd_v.dim_inventory_enodeb_site_map_norm_v0,vz-it-pr-gudv-dtwndo-0.aid_dtwin_ran_core_tbls_rd_v.dim_inventory_cell_sites_norm_v0,vz-it-pr-gudv-dtwndo-0.aid_dtwin_analytics_tbls_rd_v.vzw_ltemarkets_tbl
+    source_type: Table
+    target_name: vz-it-np-gudv-dev-dtwndo-0.aid_nwgenie_core_tbls.nqes_site
+    target_type: Table
+    frequency: Daily
+    
+vz-it-pr-wdwg-aidcom-0:
+  - dag_id: gudv_nw_research_assistant_nqes_site_daily_norm
+    dataset_id: aid_nwgenie_core_tbls
+    stored_proc: nqes_site_sp
+    table_name: nqes_site
+    source_name : vz-it-pr-fjpv-mlopdo-0.mlops_scores_tbls.nqes_site_scores
+    schedule_interval: "30 19 * * *"
+    source_type: Table
+    target_name: vz-it-pr-gudv-dtwndo-0.aid_nwgenie_core_tbls.nqes_site
+    target_type: Table
+    frequency: Daily
