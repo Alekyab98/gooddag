@@ -1,0 +1,37 @@
++ sh ./bin/deploy_composer_run.sh -C deploy.yaml -E dev -S outage_line -J oneci_dtwin
+25/05/21 09:36:09|INFO|deploy-run|environment: dev
+25/05/21 09:36:09|INFO|export_Config|system: outage_line
+25/05/21 09:36:09|INFO|export_Config|product: gudv
+25/05/21 09:36:09|INFO|export_Config|install_root: /usr/apps/dtwindo_dev/dev
+25/05/21 09:36:09|INFO|export_Config|source_tag: last_assembled
+25/05/21 09:36:09|INFO|export_Config|output_tag: last_deployed_dev
+25/05/21 09:36:09|INFO|export_Config|tag_repo: git@gitlab.verizon.com:network_curation/dtwin/oozie_tags.git
+25/05/21 09:36:09|INFO|export_Config|state_repo: gudv-maven-prod/dtwin/statefiles
+25/05/21 09:36:10|INFO|get_all_tags|AID_TAG_REPO_DIR: oozie_tags
+25/05/21 09:36:10|INFO|get_all_tags|namespace: gudv
+25/05/21 09:36:10|INFO|get_all_tags|system: outage_line
+25/05/21 09:36:10|INFO|get_all_tags|tag: last_assembled
+25/05/21 09:36:10|INFO|get_all_tags|oozie_tags/gudv/outage_line/last_assembled
+25/05/21 09:36:11|INFO|determine_tag|Found latest source tag: gudv_outage_line_bundle_2025_05_21_2
+25/05/21 09:36:11|INFO|root_installation|Formatting root installation folder: /usr/apps/dtwindo_dev/dev
+25/05/21 09:36:11|INFO|root_installation|tag location: /usr/apps/dtwindo_dev/dev/outage_line/gudv_outage_line_bundle_2025_05_21_2
+25/05/21 09:36:11|INFO|download_state|Downloading state file from: gudv-maven-prod/dtwin/statefiles/gudv_outage_line_bundle_2025_05_21_2
+25/05/21 09:36:15|INFO|extract_statefile|Artifact location: https://oneartifactoryci.verizon.com/artifactory/gudv-maven-prod/dtwin/nw_research_assistant/outage_line/test/outage_line-1.0.17.tgz
+25/05/21 09:36:15|INFO|extract_statefile|Artifact: outage_line-1.0.17.tgz
+09:36:16 [Info] Searching items to download...
+09:36:18 [Info] [Thread 2] Downloading gudv-maven-prod/dtwin/nw_research_assistant/outage_line/test/outage_line-1.0.17.tgz
+{
+  "status": "success",
+  "totals": {
+    "success": 1,
+    "failure": 0
+  }
+}
+25/05/21 09:36:18|INFO|extract_statefile|Relocating outage_line-1.0.17.tgz to /usr/apps/dtwindo_dev/dev/outage_line/gudv_outage_line_bundle_2025_05_21_2/
+25/05/21 09:36:18|INFO|extract_statefile|Extracting tarball: /usr/apps/dtwindo_dev/dev/outage_line/gudv_outage_line_bundle_2025_05_21_2/outage_line-1.0.17.tgz
+25/05/21 09:36:18|INFO|extract_statefile|tar --strip-components 1 -xf /usr/apps/dtwindo_dev/dev/outage_line/gudv_outage_line_bundle_2025_05_21_2/outage_line-1.0.17.tgz -C /usr/apps/dtwindo_dev/dev/outage_line/gudv_outage_line_bundle_2025_05_21_2/
+/usr/apps/dtwindo_dev/dev/outage_line/gudv_outage_line_bundle_2025_05_21_2/gudv_outage_line/dag/config:gudv_outage_line_bundle_2025_05_21_2
+25/05/21 09:36:19|INFO|extract_statefile|.... dag config  variables replaced successfully...
+/usr/apps/dtwindo_dev/dev/outage_line/gudv_outage_line_bundle_2025_05_21_2/gudv_outage_line/dag/uat/config:gudv_outage_line_bundle_2025_05_21_2
+gudv_outage_line.yml yaml contains  null values in source_name key, exiting
+25/05/21 09:36:19|ERROR|extract_statefile|...Unable to parser dag configuration files for uat...
