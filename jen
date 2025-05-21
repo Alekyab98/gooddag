@@ -1,0 +1,145 @@
+pipeline {
+    parameters {
+      string(name: 'agentLabel', defaultValue: 'dtwindo_dev', description: 'Populate with your provisioned build server')
+      string(name: 'config', defaultValue: 'deploy.yaml', description: 'Deploy configuration file name default : deploy.yaml')
+      string(name: 'composer_utils_version', defaultValue: '3.0.0', description: 'The deployment environment')
+      string(name: 'environment', defaultValue: 'dev', description: 'The deployment environment')
+      choice(
+                  name: 'build_module',
+                  choices: ['nqes_site','nqes_mobile','nqes_fwa','remedy_nrb','network_alarms','check_network_status','outage_line','outage_site','fuze_projects'],
+                  description: 'Module to build'
+              )
+     gitParameter(
+            branchFilter: 'origin/(.*)',
+            defaultValue: 'dev',
+            name: 'BRANCH',
+            type: 'PT_BRANCH',
+            selectedValue: 'DEFAULT',
+            sortMode: 'ASCENDING_SMART',
+            description: 'Select Branch',
+            useRepository: 'git@gitlab.verizon.com:network_curation/network_genie/gcp/nw_research_assistant.git')
+    }
+    agent {
+        label "${agentLabel}"
+    }
+    options {
+        // This is required if you want to clean before build
+        skipDefaultCheckout(true)
+    }
+    stages {
+        stage("checkout") {
+
+            steps {
+                cleanWs()
+                echo "checking out from ${params.BRANCH}"
+                             checkout([
+                    poll: false,
+                    scm: [$class: 'GitSCM', branches: [[name: "${params.BRANCH}"]],
+                    extensions: [],
+                    gitTool: 'Default',
+                    userRemoteConfigs: [[credentialsId: 'SVC-NDC-DTWIN-DEV', url: 'git@gitlab.verizon.com:network_curation/network_genie/gcp/nw_research_assistant.git']]]
+                    ])
+
+                echo "Done checkout"
+            }
+        }
+        stage('pre-package') {
+        steps {
+         script {
+           echo environment
+           echo 'Downloading the required packages'
+            if( composer_utils_version == '1.0.0') {
+             // Download latest artifact for gudv-maven-prod/dtwin/dtwin_utils/test/
+               sh 'jfrog rt dl --flat=true gudv-maven-prod/common_utils/composer_utils/utils/composer_utils-1.0.0.tgz --server-id oneci_dtwin'}
+                 else{
+                   sh 'jfrog rt dl --flat=true gudv-maven-prod/common_utils/composer_utils/utils/composer_utils-${composer_utils_version}.tgz --server-id oneci_dtwin'}
+                    }
+                     sh 'tar -xvf composer_utils-*.tgz'
+                      sh 'rm composer_utils-*.tgz'
+                       sh 'mv conf/aidpe_composer_utils/* ./'
+                       sh 'rm -rf conf'
+                     }
+        }
+
+        stage('deploy-bq-ddl')
+       {
+          steps {
+             script {
+                echo environment
+                if (environment == 'prod') {
+                    echo '**********Deploying BQ Store Procedures*********'
+                    sh """
+                    cd ./${build_module}/pipelines/src/main/
+                    sh -x ./scripts/run_bq_ddl_deploy.sh deployprd.cfg
+                    """
+                }
+                else if (environment == 'stg') {
+                    echo '**********Deploying BQ Store Procedures*********'
+                    sh """
+                    cd ./${build_module}/pipelines/src/main/
+                    sh -x ./scripts/run_bq_ddl_deploy.sh deployuat.cfg
+                    """
+                }
+                else {
+                    echo '**********Deploying BQ Store Procedures*********'
+                    sh """
+                    cd ./${build_module}/pipelines/src/main/
+                    sh -x ./scripts/run_bq_ddl_deploy.sh deploydev.cfg
+                    """
+                    }
+             }
+          }
+       }
+        stage('package') {
+            steps {
+              script {
+                  echo environment
+                  if (environment == 'prod' || environment == 'stg') {
+                      echo 'Skipping packages step'
+                  }
+                  else {
+                      sh """sh ./bin/package.sh -p ./${build_module}.conf"""
+
+                  }
+              }
+            }
+        }
+        stage('publish') {
+            steps {
+              script {
+                  echo environment
+                  if (environment == 'prod' || environment == 'stg') {
+                      echo 'Skipping publish step'
+                  }
+                  else {
+                      sh """
+                      cd ./tmp/${build_module}/
+                      jfrog rt u *.tgz gudv-maven-prod/dtwin/nw_research_assistant/${build_module}/test/ --server-id oneci_dtwin"""
+                      sh "sleep 20s"
+                  }
+              }
+            }
+        }
+        stage('assembly')
+        {
+                steps {
+                      script {
+                          echo environment
+                          if (environment == 'prod' || environment == 'stg') {
+                              echo 'Skipping assembly step'
+                          }
+                          else {
+                              sh """sh ./bin/assembly_run.sh -P gudv -S ${build_module} -T git@gitlab.verizon.com:network_curation/dtwin/oozie_tags.git -R gudv-maven-prod/dtwin/statefiles -J oneci_dtwin"""
+                          }
+                      }
+                    }
+                }
+         stage('deploy') {
+            steps {
+                echo 'Deployment on "${agentLabel}"'
+                sh """
+                sh ./bin/deploy_composer_run.sh -C ${config} -E ${environment} -S ${build_module} -J oneci_dtwin"""}
+        }
+    }
+}
+
