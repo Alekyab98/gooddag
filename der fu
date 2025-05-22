@@ -1,0 +1,56 @@
+default-hostname
+*** Reading remote logs from Cloud Logging.
+[2025-05-22, 04:59:57 UTC] {local_task_job_runner.py:123} ▶ Pre task execution logs
+[2025-05-22, 04:59:57 UTC] {connection.py:277} WARNING - Connection schemes (type: google_cloud_platform) shall not contain '_' according to RFC3986.
+[2025-05-22, 04:59:57 UTC] {base.py:84} INFO - Retrieving connection '***'
+[2025-05-22, 04:59:57 UTC] {bigquery.py:2959} INFO - Executing: {'query': {'query': "CALL aid_nwgenie_core_tbls.fuze_projects_sp('2025-04-30','2025-05-01')", 'useLegacySql': False}}'
+[2025-05-22, 04:59:57 UTC] {bigquery.py:1699} INFO - Inserting job airflow_gudv_nw_research_assistant_fuze_projects_daily_norm_call_fuze_projects_sp_2025_04_30T19_30_00_00_00_247416009d5f56e7ccde2898253d8349
+[2025-05-22, 05:00:18 UTC] {taskinstance.py:3312} ERROR - Task failed with exception
+Traceback (most recent call last):
+  File "/opt/python3.11/lib/python3.11/site-packages/airflow/models/taskinstance.py", line 768, in _execute_task
+    result = _execute_callable(context=context, **execute_callable_kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/python3.11/lib/python3.11/site-packages/airflow/models/taskinstance.py", line 734, in _execute_callable
+    return ExecutionCallableRunner(
+           ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/python3.11/lib/python3.11/site-packages/airflow/utils/operator_helpers.py", line 252, in run
+    return self.func(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/python3.11/lib/python3.11/site-packages/airflow/models/baseoperator.py", line 415, in wrapper
+    return func(self, *args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/python3.11/lib/python3.11/site-packages/airflow/providers/google/cloud/operators/bigquery.py", line 3025, in execute
+    job.result(timeout=self.result_timeout, retry=self.result_retry)
+  File "/opt/python3.11/lib/python3.11/site-packages/google/cloud/bigquery/job/query.py", line 1681, in result
+    while not is_job_done():
+              ^^^^^^^^^^^^^
+  File "/opt/python3.11/lib/python3.11/site-packages/google/cloud/bigquery/job/query.py", line 1650, in is_job_done
+    self._reload_query_results(retry=retry, **reload_query_results_kwargs)
+  File "/opt/python3.11/lib/python3.11/site-packages/google/cloud/bigquery/job/query.py", line 1448, in _reload_query_results
+    self._query_results = self._client._get_query_results(
+                          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/python3.11/lib/python3.11/site-packages/google/cloud/bigquery/client.py", line 2028, in _get_query_results
+    resource = self._call_api(
+               ^^^^^^^^^^^^^^^
+  File "/opt/python3.11/lib/python3.11/site-packages/google/cloud/bigquery/client.py", line 837, in _call_api
+    return call()
+           ^^^^^^
+  File "/opt/python3.11/lib/python3.11/site-packages/google/api_core/retry/retry_unary.py", line 293, in retry_wrapped_func
+    return retry_target(
+           ^^^^^^^^^^^^^
+  File "/opt/python3.11/lib/python3.11/site-packages/google/api_core/retry/retry_unary.py", line 153, in retry_target
+    _retry_error_helper(
+  File "/opt/python3.11/lib/python3.11/site-packages/google/api_core/retry/retry_base.py", line 212, in _retry_error_helper
+    raise final_exc from source_exc
+  File "/opt/python3.11/lib/python3.11/site-packages/google/api_core/retry/retry_unary.py", line 144, in retry_target
+    result = target()
+             ^^^^^^^^
+  File "/opt/python3.11/lib/python3.11/site-packages/google/cloud/_http/__init__.py", line 494, in api_request
+    raise exceptions.from_http_response(response)
+google.api_core.exceptions.BadRequest: 400 GET https://bigquery.googleapis.com/bigquery/v2/projects/vz-it-np-gudv-dev-dtwndo-0/queries/airflow_gudv_nw_research_assistant_fuze_projects_daily_norm_call_fuze_projects_sp_2025_04_30T19_30_00_00_00_247416009d5f56e7ccde2898253d8349?maxResults=0&location=US&prettyPrint=false: Query error: Array index 1 is out of bounds (overflow) at [vz-it-np-gudv-dev-dtwndo-0.aid_nwgenie_core_tbls.fuze_projects_sp:43:1] at [vz-it-np-gudv-dev-dtwndo-0.aid_nwgenie_core_tbls.fuze_projects_sp:119:1]
+
+Location: US
+Job ID: airflow_gudv_nw_research_assistant_fuze_projects_daily_norm_call_fuze_projects_sp_2025_04_30T19_30_00_00_00_247416009d5f56e7ccde2898253d8349
+
+[2025-05-22, 05:00:18 UTC] {taskinstance.py:1226} INFO - Marking task as UP_FOR_RETRY. dag_id=gudv_nw_research_assistant_fuze_projects_daily_norm, task_id=call_fuze_projects_sp, run_id=scheduled__2025-04-30T19:30:00+00:00, execution_date=20250430T193000, start_date=20250522T045957, end_date=20250522T050018
+[2025-05-22, 05:00:18 UTC] {taskinstance.py:340} ▶ Post task execution logs
